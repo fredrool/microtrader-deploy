@@ -1,0 +1,13 @@
+# STS Role and target account
+Sts.Role: arn:aws:iam::305261792510:role/admin
+
+Stack.Name: microtrader-production
+Stack.Description: Microtrader Stack - Production
+
+# Override all deletion policies of type AWS::RDS::DBInstance
+AWS::RDS::DBInstance:
+  DeletionPolicy: Delete
+
+# Override all deletion policies of type AWS::Logs::LogGroup
+AWS::Logs::LogGroup:
+  DeletionPolicy: Delete
