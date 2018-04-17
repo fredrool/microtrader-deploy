@@ -24,7 +24,7 @@ Stack.Inputs.DatabasePassword: AQICAHiVW9CvaYVcau8xYWewwtEj+uy4l86zffn76bRFZPzAq
 
 # Application settings
 Stack.Inputs.ApplicationDnsName: dev-microtrader
-Stack.Inputs.ApplicationImageId: ami-2ac7f74f
+Stack.Inputs.ApplicationImageId: ami-7f0c3f1a
 Stack.Inputs.ApplicationKeyName: platime
 
 # ECS task runner settings
