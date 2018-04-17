@@ -20,7 +20,7 @@ Stack.Inputs.MicrotraderDashboardHttpPort: 8002
 # Database settings
 Stack.Inputs.DatabaseName: audit
 Stack.Inputs.DatabaseUsername: audit
-Stack.Inputs.DatabasePassword: super-secret-password
+Stack.Inputs.DatabasePassword: AQICAHiVW9CvaYVcau8xYWewwtEj+uy4l86zffn76bRFZPzAqAFqpQl+pk/8f8cerZI1Zh1DAAAAczBxBgkqhkiG9w0BBwagZDBiAgEAMF0GCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMrgHt+MDhBC5jGFiYAgEQgDAuReUy0hZcFdYF7Rd6YqYB1ElztUppduVeYgXIFylX0lWtvWhO6AFKVQlE7F2nNOo=
 
 # Application settings
 Stack.Inputs.ApplicationDnsName: dev-microtrader

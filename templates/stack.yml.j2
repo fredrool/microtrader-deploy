@@ -40,6 +40,11 @@ Parameters:
   DatabaseUsername:
     Type: String
     Description: Database username
+  ClusterPassword:
+    Type: String
+    Default: "super-secret-password"
+    Description: Cluster password
+    NoEcho: true
   DatabasePassword:
     Type: String
     Description: Database password
@@ -90,6 +95,99 @@ Conditions:
       - 1
 
 Resources:
+  ClusterSecret:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::Sub: ${SecretsProvisioner.Arn}
+      Name:
+        Fn::Sub: /${AWS::StackName}/cluster/password
+      Key: CLUSTER_GROUP_PASSWORD
+      Value: 
+        Ref: DatabasePassword
+      KmsKeyId:
+        Fn::ImportValue: CfnMasterKey
+      Trigger: 1
+  DatabaseSecret:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken:
+        Fn::Sub: ${SecretsProvisioner.Arn}
+      Name:
+        Fn::Sub: /${AWS::StackName}/database/password
+      Key: JDBC_PASSWORD
+      Value: 
+        Ref: DatabasePassword
+      KmsKeyId:
+        Fn::ImportValue: CfnMasterKey
+  SecretsProvisionerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: lambda.amazonaws.com
+          Action:
+            - sts:AssumeRole
+      Policies:
+        - PolicyName: SecretsProvisionerPermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+            - Sid: ProvisionSecrets
+              Effect: Allow
+              Action:
+              - ssm:GetParameters
+              - ssm:PutParameter
+              - ssm:DeleteParameter
+              - ssm:AddTagsToResource
+              - ssm:ListTagsForResource
+              Resource:
+                Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/*
+            - Sid: Encrypt
+              Effect: Allow
+              Action:
+              - kms:Decrypt
+              - kms:Encrypt
+              Resource:
+                Fn::ImportValue: CfnMasterKeyArn
+            - Sid: ManageLambdaLogs
+              Effect: Allow
+              Action:
+              - logs:CreateLogStream
+              - logs:DescribeLogStreams
+              - logs:PutLogEvents
+              Resource:
+                Fn::Sub: ${SecretsProvisionerLogGroup.Arn}
+  SecretsProvisioner:
+    Type: AWS::Lambda::Function
+    DependsOn:
+      - SecretsProvisionerLogGroup
+    Properties:
+      FunctionName:
+        Fn::Sub: ${AWS::StackName}-secretsProvisioner
+      Description:
+        Fn::Sub: ${AWS::StackName} Secrets Provisioner
+      Handler: secrets_provisioner.handler
+      MemorySize: 128
+      Runtime: python2.7
+      Timeout: 300
+      Code:
+        S3Bucket:
+          Fn::Sub: ${AWS::AccountId}-${AWS::Region}-cfn-lambda
+        S3Key: secretsProvisioner.zip
+      Role:
+        Fn::Sub: ${SecretsProvisionerRole.Arn}
+  SecretsProvisionerLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${AWS::StackName}-secretsProvisioner
+      RetentionInDays:
+        Ref: LogRetention
   EcsTaskRunnerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -178,9 +276,38 @@ Resources:
       TaskDefinition:
         Ref: MigrateTaskDefinition
       RunOnUpdate: "true"
+  MigrateTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: SSMSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                - ssm:GetParameters
+                Resource:
+                  - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/database/password
+              - Effect: Allow
+                Action:
+                - kms:Decrypt
+                Resource:
+                  Fn::ImportValue: CfnMasterKeyArn
   MigrateTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
+      TaskRoleArn:
+        Fn::Sub: ${MigrateTaskRole.Arn}
       NetworkMode: host
       ContainerDefinitions:
         - Name: migrate
@@ -195,16 +322,16 @@ Resources:
             - /app/app.jar
             - com.pluralsight.dockerproductionaws.admin.Migrate
           Environment:
-            - Name: JDBC_PASSWORD
+            - Name: SSM_SECRETS
               Value:
-                Ref: DatabasePassword
-            - Name: AWS_DEFAULT_REGION
-              Value:
-                Ref: AWS::Region
+                Fn::Sub: /${AWS::StackName}/database/password
             - Name: HTTPS_PROXY
               Value:
                 Fn::ImportValue:
                   Fn::Sub: ${VpcName}ProxyUrl
+            - Name: AWS_DEFAULT_REGION
+              Value:
+                Ref: AWS::Region
             - Name: JDBC_URL
               Value:
                 Fn::Sub: jdbc:mysql://${ApplicationDatabase.Endpoint.Address}/${DatabaseName}?useSSL=false
@@ -366,15 +493,25 @@ Resources:
           Memory: 800
           Cpu: 200
           Environment:
+            - Name: SSM_SECRETS
+              Value:
+                Fn::Sub: /${AWS::StackName}/database/password /${AWS::StackName}/cluster/password
+            - Name: SSM_VERSIONS
+              Value:
+                Fn::Sub: ${DatabaseSecret} ${ClusterSecret}
+            - Name: AWS_DEFAULT_REGION
+              Value:
+                Ref: AWS::Region
+            - Name: HTTPS_PROXY
+              Value:
+                Fn::ImportValue:
+                  Fn::Sub: ${VpcName}ProxyUrl
             - Name: JDBC_URL
               Value:
                 Fn::Sub: jdbc:mysql://${ApplicationDatabase.Endpoint.Address}/${DatabaseName}?useSSL=false
             - Name: JDBC_USER
               Value:
                 Ref: DatabaseUsername
-            - Name: JDBC_PASSWORD
-              Value:
-                Ref: DatabasePassword
             - Name: JDBC_DRIVERCLASS
               Value: com.mysql.jdbc.Driver
             - Name: HTTP_PORT
@@ -390,8 +527,6 @@ Resources:
             - Name: CLUSTER_GROUP_NAME
               Value:
                 Ref: ApplicationCluster
-            - Name: CLUSTER_GROUP_PASSWORD
-              Value: super-secret-password
             - Name: CLUSTER_AWS_ENABLED
               Value: "true"
             - Name: CLUSTER_AWS_REGION
@@ -446,11 +581,22 @@ Resources:
           Memory: 800
           Cpu: 200
           Environment:
+            - Name: SSM_SECRETS
+              Value:
+                Fn::Sub: /${AWS::StackName}/cluster/password
+            - Name: SSM_VERSIONS
+              Value:
+                Fn::Sub: ${ClusterSecret}
+            - Name: HTTPS_PROXY
+              Value:
+                Fn::ImportValue:
+                  Fn::Sub: ${VpcName}ProxyUrl
+            - Name: AWS_DEFAULT_REGION
+              Value:
+                Ref: AWS::Region
             - Name: CLUSTER_GROUP_NAME
               Value:
                 Ref: ApplicationCluster
-            - Name: CLUSTER_GROUP_PASSWORD
-              Value: super-secret-password
             - Name: CLUSTER_AWS_ENABLED
               Value: "true"
             - Name: CLUSTER_AWS_REGION
@@ -504,14 +650,25 @@ Resources:
           Memory: 800
           Cpu: 200
           Environment:
+            - Name: SSM_SECRETS
+              Value:
+                Fn::Sub: /${AWS::StackName}/cluster/password
+            - Name: SSM_VERSIONS
+              Value:
+                Fn::Sub: ${ClusterSecret}
+            - Name: HTTPS_PROXY
+              Value:
+                Fn::ImportValue:
+                  Fn::Sub: ${VpcName}ProxyUrl
+            - Name: AWS_DEFAULT_REGION
+              Value:
+                Ref: AWS::Region
             - Name: HTTP_PORT
               Value:
                 Ref: MicrotraderDashboardHttpPort
             - Name: CLUSTER_GROUP_NAME
               Value:
                 Ref: ApplicationCluster
-            - Name: CLUSTER_GROUP_PASSWORD
-              Value: super-secret-password
             - Name: CLUSTER_AWS_ENABLED
               Value: "true"
             - Name: CLUSTER_AWS_REGION
@@ -587,6 +744,19 @@ Resources:
                 Ref: AWS::Region
               awslogs-stream-prefix: docker
           Environment:
+            - Name: SSM_SECRETS
+              Value:
+                Fn::Sub: /${AWS::StackName}/cluster/password
+            - Name: SSM_VERSIONS
+              Value:
+                Fn::Sub: ${ClusterSecret}
+            - Name: HTTPS_PROXY
+              Value:
+                Fn::ImportValue:
+                  Fn::Sub: ${VpcName}ProxyUrl
+            - Name: AWS_DEFAULT_REGION
+              Value:
+                Ref: AWS::Region
             - Name: HTTP_PORT
               Value:
                 Ref: MicrotraderQuoteHttpPort
@@ -612,8 +782,6 @@ Resources:
             - Name: CLUSTER_GROUP_NAME
               Value:
                 Ref: ApplicationCluster
-            - Name: CLUSTER_GROUP_PASSWORD
-              Value: super-secret-password
             - Name: JAVA_TOOL_OPTIONS
               Value:
                 Fn::Join: ["", [
@@ -762,7 +930,7 @@ Resources:
       MasterUsername:
         Ref: DatabaseUsername
       MasterUserPassword:
-        Ref: DatabasePassword
+        Fn::Sub: ${DatabaseSecret.Value}
       DBName:
         Ref: DatabaseName
       VPCSecurityGroups:
@@ -1050,6 +1218,20 @@ Resources:
             Action:
               - sts:AssumeRole
       Policies:
+        - PolicyName: SSMSecrets
+          PolicyDocument: 
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                - ssm:GetParameters
+                Resource:
+                  - Fn::Sub: arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AWS::StackName}/*
+              - Effect: Allow
+                Action:
+                - kms:Decrypt
+                Resource:
+                  Fn::ImportValue: CfnMasterKeyArn
         - PolicyName: ECSContainerInstancePolicy
           PolicyDocument:
             Version: "2012-10-17"
