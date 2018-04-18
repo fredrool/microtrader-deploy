@@ -11,3 +11,21 @@ AWS::RDS::DBInstance:
 # Override all deletion policies of type AWS::Logs::LogGroup
 AWS::Logs::LogGroup:
   DeletionPolicy: Delete
+
+  # Microtrader settings
+Stack.Inputs.MicrotraderQuoteHttpPort: 8000
+Stack.Inputs.MicrotraderAuditHttpPort: 8001
+Stack.Inputs.MicrotraderDashboardHttpPort: 8002
+
+# Database settings
+Stack.Inputs.DatabaseName: audit
+Stack.Inputs.DatabaseUsername: audit
+Stack.Inputs.DatabasePassword: AQICAHiVW9CvaYVcau8xYWewwtEj+uy4l86zffn76bRFZPzAqAFqpQl+pk/8f8cerZI1Zh1DAAAAczBxBgkqhkiG9w0BBwagZDBiAgEAMF0GCSqGSIb3DQEHATAeBglghkgBZQMEAS4wEQQMrgHt+MDhBC5jGFiYAgEQgDAuReUy0hZcFdYF7Rd6YqYB1ElztUppduVeYgXIFylX0lWtvWhO6AFKVQlE7F2nNOo=
+
+# Application settings
+Stack.Inputs.ApplicationDnsName: prod-microtrader
+Stack.Inputs.ApplicationImageId: ami-7f0c3f1a
+Stack.Inputs.ApplicationKeyName: platime
+
+# ECS task runner settings
+Stack.Inputs.EcsTaskRunnerVersion: OLnYyKJiBLh1YwmwnKkIKvF0QkHZjCUo
